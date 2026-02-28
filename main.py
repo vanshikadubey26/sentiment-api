@@ -1,4 +1,5 @@
 import os
+import json
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -6,16 +7,16 @@ from pydantic import BaseModel, Field
 from typing import Literal
 from openai import OpenAI
 
-# Load .env file
+# Load environment variables
 load_dotenv()
 
 # Get API key
 api_key = os.getenv("OPENAI_API_KEY")
 
 if not api_key:
-    raise ValueError("OPENAI_API_KEY not found. Check your .env file.")
+    raise ValueError("OPENAI_API_KEY not found. Set it in Render Environment.")
 
-# Create client
+# Create OpenAI client
 client = OpenAI(api_key=api_key)
 
 app = FastAPI()
@@ -29,17 +30,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# =========================
+# Request Model
+# =========================
 class CommentRequest(BaseModel):
     comment: str = Field(..., min_length=1)
 
+# =========================
+# Response Model
+# =========================
 class SentimentResponse(BaseModel):
     sentiment: Literal["positive", "negative", "neutral"]
     rating: int = Field(..., ge=1, le=5)
 
-
+# =========================
+# Main Endpoint
+# =========================
 @app.post("/comment", response_model=SentimentResponse)
 def analyze_comment(request: CommentRequest):
-
     try:
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
@@ -71,12 +79,14 @@ def analyze_comment(request: CommentRequest):
             temperature=0
         )
 
-        return response.choices[0].message.parsed
+        # Parse JSON safely
+        content = response.choices[0].message.content
+        return json.loads(content)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
+# Root route
 @app.get("/")
 def home():
     return {"message": "Sentiment API Running"}
