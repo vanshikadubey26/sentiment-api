@@ -1,23 +1,9 @@
 import os
-import json
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from typing import Literal
 from openai import OpenAI
-
-# Load environment variables
-load_dotenv()
-
-# Get API key
-api_key = os.getenv("OPENAI_API_KEY")
-
-if not api_key:
-    raise ValueError("OPENAI_API_KEY not found. Set it in Render Environment.")
-
-# Create OpenAI client
-client = OpenAI(api_key=api_key)
 
 app = FastAPI()
 
@@ -30,63 +16,68 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# =========================
 # Request Model
-# =========================
 class CommentRequest(BaseModel):
-    comment: str = Field(..., min_length=1)
+    comment: str
 
-# =========================
 # Response Model
-# =========================
 class SentimentResponse(BaseModel):
     sentiment: Literal["positive", "negative", "neutral"]
-    rating: int = Field(..., ge=1, le=5)
+    rating: int
 
-# =========================
-# Main Endpoint
-# =========================
 @app.post("/comment", response_model=SentimentResponse)
-def analyze_comment(request: CommentRequest):
+async def analyze_comment(request: CommentRequest):
+
     try:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY not set")
+
+        client = OpenAI(api_key=api_key)
+
         response = client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=[
-                {"role": "system", "content": "You are a sentiment analysis API."},
-                {"role": "user", "content": request.comment}
-            ],
-            response_format={
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "sentiment_schema",
-                    "schema": {
-                        "type": "object",
-                        "properties": {
-                            "sentiment": {
-                                "type": "string",
-                                "enum": ["positive", "negative", "neutral"]
-                            },
-                            "rating": {
-                                "type": "integer",
-                                "minimum": 1,
-                                "maximum": 5
-                            }
-                        },
-                        "required": ["sentiment", "rating"]
-                    }
+                {
+                    "role": "system",
+                    "content": "You are a sentiment analysis API. Return only valid JSON."
+                },
+                {
+                    "role": "user",
+                    "content": f"""
+Analyze the comment and return JSON:
+
+{{
+  "sentiment": "positive | negative | neutral",
+  "rating": 1-5
+}}
+
+Rules:
+5 = highly positive
+4 = positive
+3 = neutral
+2 = negative
+1 = highly negative
+
+Comment:
+{request.comment}
+"""
                 }
-            },
+            ],
             temperature=0
         )
 
-        # Parse JSON safely
-        content = response.choices[0].message.content
-        return json.loads(content)
+        content = response.choices[0].message.content.strip()
+
+        import json
+        result = json.loads(content)
+
+        return result
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Root route
+
 @app.get("/")
 def home():
     return {"message": "Sentiment API Running"}
