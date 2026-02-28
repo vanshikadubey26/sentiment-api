@@ -29,21 +29,14 @@ async def analyze_comment(request: CommentRequest):
     try:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise HTTPException(status_code=500, detail="API key missing")
+            raise HTTPException(status_code=500, detail="OPENAI_API_KEY not found")
 
         client = OpenAI(api_key=api_key)
 
-        response = client.chat.completions.create(
+        response = client.responses.create(
             model="gpt-4.1-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Return ONLY valid JSON with keys sentiment and rating."
-                },
-                {
-                    "role": "user",
-                    "content": f"""
-Analyze sentiment:
+            input=f"""
+Analyze this comment and return ONLY valid JSON:
 
 Comment: {request.comment}
 
@@ -52,22 +45,25 @@ Return exactly:
   "sentiment": "positive | negative | neutral",
   "rating": 1-5
 }}
+
+Rules:
+5 = highly positive
+4 = positive
+3 = neutral
+2 = negative
+1 = highly negative
 """
-                }
-            ],
-            temperature=0
         )
 
-        content = response.choices[0].message.content.strip()
+        content = response.output_text.strip()
 
         result = json.loads(content)
 
-        # Safety validation
         if result["sentiment"] not in ["positive", "negative", "neutral"]:
-            raise ValueError("Invalid sentiment")
+            raise ValueError("Invalid sentiment value")
 
         if not (1 <= int(result["rating"]) <= 5):
-            raise ValueError("Invalid rating")
+            raise ValueError("Invalid rating value")
 
         return result
 
