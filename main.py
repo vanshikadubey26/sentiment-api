@@ -1,4 +1,5 @@
 import os
+import json
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,7 +8,6 @@ from openai import OpenAI
 
 app = FastAPI()
 
-# Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,11 +16,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Request Model
 class CommentRequest(BaseModel):
     comment: str
 
-# Response Model
 class SentimentResponse(BaseModel):
     sentiment: Literal["positive", "negative", "neutral"]
     rating: int
@@ -31,7 +29,7 @@ async def analyze_comment(request: CommentRequest):
     try:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise HTTPException(status_code=500, detail="OPENAI_API_KEY not set")
+            raise HTTPException(status_code=500, detail="API key missing")
 
         client = OpenAI(api_key=api_key)
 
@@ -40,27 +38,20 @@ async def analyze_comment(request: CommentRequest):
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a sentiment analysis API. Return only valid JSON."
+                    "content": "Return ONLY valid JSON with keys sentiment and rating."
                 },
                 {
                     "role": "user",
                     "content": f"""
-Analyze the comment and return JSON:
+Analyze sentiment:
 
+Comment: {request.comment}
+
+Return exactly:
 {{
   "sentiment": "positive | negative | neutral",
   "rating": 1-5
 }}
-
-Rules:
-5 = highly positive
-4 = positive
-3 = neutral
-2 = negative
-1 = highly negative
-
-Comment:
-{request.comment}
 """
                 }
             ],
@@ -69,8 +60,14 @@ Comment:
 
         content = response.choices[0].message.content.strip()
 
-        import json
         result = json.loads(content)
+
+        # Safety validation
+        if result["sentiment"] not in ["positive", "negative", "neutral"]:
+            raise ValueError("Invalid sentiment")
+
+        if not (1 <= int(result["rating"]) <= 5):
+            raise ValueError("Invalid rating")
 
         return result
 
